@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	_ "embed"
+	"flag"
 	"fmt"
 	"image/png"
 	"math"
@@ -17,7 +18,7 @@ import (
 	"golang.org/x/image/font/basicfont"
 )
 
-//go:embed drone.png
+//go:embed assets/drone.png
 var dronePng []byte
 
 func main() {
@@ -25,6 +26,11 @@ func main() {
 }
 
 func run() {
+	// Parse the args
+	var numDrones int
+	flag.IntVar(&numDrones, "n", 1000, "Number of drones to simulate")
+	flag.Parse()
+
 	// Start the window
 	cfg := pixelgl.WindowConfig{
 		Title:     "Flocking",
@@ -69,7 +75,7 @@ func run() {
 	predatorFlocking.AddRule(tr, 1.0)
 
 	// Initialise the drones and spawn the workers
-	ds := make([]*Drone, 2000)
+	ds := make([]*Drone, numDrones)
 	for i := range ds {
 		f := flocking
 		v := rand.Float64()*2.5 + 10

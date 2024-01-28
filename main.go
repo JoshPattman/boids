@@ -14,7 +14,6 @@ import (
 	"github.com/gopxl/pixel"
 	"github.com/gopxl/pixel/pixelgl"
 	"github.com/gopxl/pixel/text"
-	"golang.org/x/image/colornames"
 	"golang.org/x/image/font/basicfont"
 )
 
@@ -45,53 +44,72 @@ func run() {
 		panic(err)
 	}
 
-	// Create the flocking algorithm
-	flocking := NewFlockingAlgorithm()
-	flocking.AddRule(&CohesionRule{
+	// Create the preyFlocking algorithm
+	preyFlocking := NewFlockingAlgorithm()
+	preyFlocking.AddRule(&CohesionRule{
 		CohereRange:              15,
 		DeactivateOnNoNeighbours: false,
 	}, 0.3)
-	flocking.AddRule(&SeparationRule{
+	preyFlocking.AddRule(&SeparationRule{
 		AvoidRange:               5,
 		DeactivateOnNoNeighbours: true,
 		OnlyUseClosest:           true,
 	}, 2.0)
-	flocking.AddRule(&AlignmentRule{
+	preyFlocking.AddRule(&AlignmentRule{
 		AlignRange:               10,
 		PerformNormalisation:     false,
 		DeactivateOnNoNeighbours: true,
 	}, 1.0)
-	flocking.AddRule(&TargetingRule{
+	preyFlocking.AddRule(&TargetingRule{
 		TargetPos: pixel.ZV,
 	}, 0.2)
-	ar := &AvoidanceRule{
-		TargetPos:  pixel.ZV,
-		TargetDist: 25,
+	ar := &MultiAvoidanceRule{
+		TargetPosses: []pixel.Vec{},
+		TargetDist:   25,
 	}
-	flocking.AddRule(ar, 2.0)
+	preyFlocking.AddRule(ar, 2.0)
 
 	predatorFlocking := NewFlockingAlgorithm()
 	tr := &TargetingRule{}
-	predatorFlocking.AddRule(tr, 1.0)
+	predatorFlocking.AddRule(tr, 0.3)
+	predatorFlocking.AddRule(&CohesionRule{
+		CohereRange:              15,
+		DeactivateOnNoNeighbours: false,
+	}, 0.3)
+	predatorFlocking.AddRule(&SeparationRule{
+		AvoidRange:               5,
+		DeactivateOnNoNeighbours: true,
+		OnlyUseClosest:           true,
+	}, 2.0)
+	predatorFlocking.AddRule(&AlignmentRule{
+		AlignRange:               10,
+		PerformNormalisation:     false,
+		DeactivateOnNoNeighbours: true,
+	}, 1.0)
 
 	// Initialise the drones and spawn the workers
-	ds := make([]*Drone, numDrones)
-	for i := range ds {
-		f := flocking
-		v := rand.Float64()*2.5 + 10
-		if i == 0 {
-			f = predatorFlocking
-			v = 15
-		}
-		ds[i] = &Drone{
+	preyDs := make([]*Drone, numDrones)
+	for i := range preyDs {
+		preyDs[i] = &Drone{
 			Pos:          pixel.V(math.Sqrt(rand.Float64())*150, 0).Rotated(rand.Float64() * math.Pi * 2),
 			Vel:          pixel.V(rand.Float64()*10, 0).Rotated(rand.Float64() * math.Pi * 2),
-			MaxVel:       v,
+			MaxVel:       rand.Float64()*2.5 + 10,
 			MaxAcc:       100,
-			FlockingAlgo: f,
+			FlockingAlgo: preyFlocking,
 		}
 	}
-	drones := NewFlock(ds, runtime.NumCPU(), 15)
+	predDs := make([]*Drone, 15)
+	for i := range predDs {
+		predDs[i] = &Drone{
+			Pos:          pixel.V(math.Sqrt(rand.Float64())*150, 0).Rotated(rand.Float64() * math.Pi * 2),
+			Vel:          pixel.V(rand.Float64()*10, 0).Rotated(rand.Float64() * math.Pi * 2),
+			MaxVel:       rand.Float64()*10.0 + 10,
+			MaxAcc:       100,
+			FlockingAlgo: predatorFlocking,
+		}
+	}
+	preyFlock := NewFlock(preyDs, runtime.NumCPU(), 15)
+	predatorFlock := NewFlock(predDs, runtime.NumCPU(), 15)
 
 	// Stuff for drawing drones
 	img, err := png.Decode(bytes.NewBuffer(dronePng))
@@ -115,7 +133,7 @@ func run() {
 	currentCameraZoomVelocity := 1.0
 
 	// Stuff for predator drone
-	currentPredatorTarget := drones.Drones[1]
+	currentPredatorTarget := preyFlock.Drones[1]
 	predatorTargetTimer := 0
 
 	/*prof, _ := os.Create("profiling.prof")
@@ -125,7 +143,7 @@ func run() {
 		// Update window to get new keypresses and such
 		win.Update()
 		// Clear window background
-		win.Clear(colornames.Black)
+		win.Clear(pixel.RGB(0, 0, 0))
 
 		// Move the camera around
 		zoomSpeed := 1.05
@@ -163,7 +181,7 @@ func run() {
 			lastFrameTime = newFrameTime
 			deltaFrameSeconds := deltaFrameTime.Seconds() / 20
 			txt.Clear()
-			txt.WriteString(fmt.Sprintf("FPS %.1f | Boids %d", 1.0/deltaFrameSeconds, len(drones.Drones)))
+			txt.WriteString(fmt.Sprintf("FPS %.1f | Boids %d", 1.0/deltaFrameSeconds, len(preyFlock.Drones)))
 			counter = 0
 		}
 		counter++
@@ -172,28 +190,34 @@ func run() {
 		predatorTargetTimer++
 		if predatorTargetTimer > 240 {
 			predatorTargetTimer = 0
-			currentPredatorTarget = drones.Drones[rand.Intn(len(drones.Drones)-1)+1]
+			currentPredatorTarget = preyFlock.Drones[rand.Intn(len(preyFlock.Drones)-1)+1]
 		}
 		tr.TargetPos = currentPredatorTarget.Pos
 
 		// Update the position to avoid
 		//ar.TargetPos = win.MousePosition().Sub(win.Bounds().Center()).Scaled(1.0 / pixelsPerMeter)
-		ar.TargetPos = drones.Drones[0].Pos
+		ar.TargetPosses = []pixel.Vec{}
+		for _, d := range predatorFlock.Drones {
+			ar.TargetPosses = append(ar.TargetPosses, d.Pos)
+		}
 
 		// Update the drones (in parallell)
-		drones.Update()
+		preyFlock.Update()
+		predatorFlock.Update()
 
 		// Draw the drones (in one batch for efficiency)
 		droneBatch.Clear()
-		for di, d := range drones.Drones {
+		for _, d := range preyFlock.Drones {
 			drawMat := pixel.IM.Scaled(pixel.ZV, pixelsPerMeter*1.0/droneSprite.Frame().W())
 			drawMat = drawMat.Rotated(pixel.ZV, d.Vel.Angle()-math.Pi/2)
 			drawMat = drawMat.Moved(d.Pos.Add(metersOffset).Scaled(pixelsPerMeter)).Moved(win.Bounds().Center())
-			if di == 0 {
-				droneSprite.DrawColorMask(droneBatch, drawMat, colornames.Red)
-			} else {
-				droneSprite.Draw(droneBatch, drawMat)
-			}
+			droneSprite.Draw(droneBatch, drawMat)
+		}
+		for _, d := range predatorFlock.Drones {
+			drawMat := pixel.IM.Scaled(pixel.ZV, pixelsPerMeter*1.0/droneSprite.Frame().W())
+			drawMat = drawMat.Rotated(pixel.ZV, d.Vel.Angle()-math.Pi/2)
+			drawMat = drawMat.Moved(d.Pos.Add(metersOffset).Scaled(pixelsPerMeter)).Moved(win.Bounds().Center())
+			droneSprite.DrawColorMask(droneBatch, drawMat, pixel.RGB(1, 0, 0))
 		}
 		droneBatch.Draw(win)
 

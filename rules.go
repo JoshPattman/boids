@@ -101,3 +101,24 @@ func (r *AvoidanceRule) Force(pos pixel.Vec, ns []NeighbourInfo) (pixel.Vec, boo
 }
 
 func (r *AvoidanceRule) Range() float64 { return 0 }
+
+type MultiAvoidanceRule struct {
+	TargetPosses []pixel.Vec
+	TargetDist   float64
+}
+
+func (r *MultiAvoidanceRule) Force(pos pixel.Vec, ns []NeighbourInfo) (pixel.Vec, bool) {
+	totalDir := pixel.ZV
+	for _, tp := range r.TargetPosses {
+		dist := tp.Sub(pos).Len()
+		if dist < r.TargetDist {
+			totalDir = totalDir.Add(pos.Sub(tp).Unit())
+		}
+	}
+	if totalDir.Len() > 0 {
+		return totalDir.Unit(), true
+	}
+	return pixel.ZV, false
+}
+
+func (r *MultiAvoidanceRule) Range() float64 { return 0 }

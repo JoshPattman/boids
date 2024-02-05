@@ -17,7 +17,7 @@ import (
 	"golang.org/x/image/font/basicfont"
 )
 
-//go:embed assets/drone.png
+//go:embed assets/fishies.png
 var dronePng []byte
 
 func main() {
@@ -117,8 +117,22 @@ func run() {
 		panic(err)
 	}
 	pic := pixel.PictureDataFromImage(img)
-	droneSprite := pixel.NewSprite(pic, pic.Bounds())
+	//droneSprite := pixel.NewSprite(pic, pic.Bounds())
 	droneBatch := pixel.NewBatch(&pixel.TrianglesData{}, pic)
+	droneAnimator := NewAnimator(pic, 32,
+		map[string]pixel.Vec{
+			"swim.1": pixel.V(0, 0),
+			"swim.2": pixel.V(1, 0),
+			"swim.3": pixel.V(2, 0),
+		},
+		map[string][]string{
+			"swim": {"swim.1", "swim.2", "swim.3"},
+		},
+		map[string]float64{
+			"swim": 0.5,
+		},
+	)
+	droneAnimator.Play("swim")
 
 	// Frame counter stuff
 	atlas := text.NewAtlas(basicfont.Face7x13, text.ASCII)
@@ -195,15 +209,19 @@ func run() {
 		tr.TargetPos = currentPredatorTarget.Pos
 
 		// Update the position to avoid
-		//ar.TargetPos = win.MousePosition().Sub(win.Bounds().Center()).Scaled(1.0 / pixelsPerMeter)
 		ar.TargetPosses = []pixel.Vec{}
 		for _, d := range predatorFlock.Drones {
 			ar.TargetPosses = append(ar.TargetPosses, d.Pos)
 		}
+		ar.TargetPosses = append(ar.TargetPosses, win.MousePosition().Sub(win.Bounds().Center()).Scaled(1.0/pixelsPerMeter))
 
 		// Update the drones (in parallell)
 		preyFlock.Update()
 		predatorFlock.Update()
+
+		// Update the animators
+		droneAnimator.Step(1.0 / 60)
+		droneSprite := droneAnimator.CurrentSprite()
 
 		// Draw the drones (in one batch for efficiency)
 		droneBatch.Clear()
